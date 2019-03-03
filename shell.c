@@ -8,10 +8,12 @@
 #include<signal.h>
 
 enum type { 
-  OVERWRITE2FILE, APPEND2FILE, READFROMFILE, NORMAL 
+  OVERWRITE2FILE, APPEND2FILE, READFROMFILE, PIPE, NORMAL 
+  //>>            >            <             |
 } Type;
 
-void dontKillMe();											//function prototypes
+void dontKillMe();											//function prototype
+void trimLeadingSpaces(char *str, char ch);
 
 void tokeniser(char *input,char **args){
   int i=0;
@@ -22,19 +24,21 @@ void tokeniser(char *input,char **args){
 
 enum type redirectionChecker(char *input,char **args){
 
-  char *p=strstr(input,">");                                //check if > exists in input string
-  char *q=strstr(input,">>");                               //check if >> exists in input string
-  char *r=strstr(input,"<");
+  char *p=strstr(input,">>");                               //check if >> exists in input string
+  char *q=strstr(input,">");                                //check if > exists in input string
+  char *r=strstr(input,"<");                                //check if < exists in the input string
+  char *s=strstr(input,"|");                                //check if | exists in the input string
 //   int i=0;
 //   args[i] = strtok(input,">");                           //arr[0] will have command name
 //   while(args[i]!=NULL) args[++i] = strtok(NULL,">");
 // printf("%d\n", i);
 
   
-  if(q!=NULL)      return APPEND2FILE; //should be above p!=NULL check
-  else if(p!=NULL) return OVERWRITE2FILE;
+  if(p!=NULL)      return APPEND2FILE; //should be above q!=NULL check
+  else if(q!=NULL) return OVERWRITE2FILE;
   else if(r!=NULL) return READFROMFILE;
-  else return NORMAL;
+  else if(s!=NULL) return PIPE;
+  else             return NORMAL;
 //
 //   args[++i]=NULL;
 
@@ -49,7 +53,7 @@ void redirectionExecution(char *input,char *filename,char **args,enum type r_typ
     close(1);
     int fd;
     if(fd= open(filename,O_CREAT|O_WRONLY|O_APPEND,0777)==-1){
-      perror("failed to open/create file");
+      perror("error: failed to open/create file");
     }
     else{
     tokeniser(input,args);
@@ -66,7 +70,7 @@ void redirectionExecution(char *input,char *filename,char **args,enum type r_typ
     close(1);
     int fd;
     if(fd = open(filename,O_WRONLY|O_CREAT|O_TRUNC,0777)==-1){
-      perror("failed to open/create file");
+      perror("error: failed to open/create file");
     }
     else{
     tokeniser(input,args);
@@ -81,7 +85,7 @@ void redirectionExecution(char *input,char *filename,char **args,enum type r_typ
     close(0);
     int fd;
     if(fd= open(filename,O_RDONLY)==-1){
-      perror("failed to open file");
+      perror("error: failed to open file");
     } 
     else{
     tokeniser(input,args);
@@ -92,11 +96,49 @@ void redirectionExecution(char *input,char *filename,char **args,enum type r_typ
     }
   }
 
+  else if(r_type==PIPE){
+    int fd[2];
+    if(pipe(fd)==-1){
+      perror("error: failed to create pipe");
+    }
+    printf("%s\n",filename);
+    pid_t pipe_child = fork();
+    /*
+      if the command is : "ls | wc - l", the child will execute ls,
+      and send it to the stdin of parent (who executes wc -l)
+    */
+    if(pipe_child==0){                                
+        close(fd[0]);
+        close(1);
+        dup(fd[1]);
+        tokeniser(input,args);
+        if(execvp(args[0],args)<0){                   //execute command and check if unsuccessful
+          perror("error: exec failed");
+          exit(1);
+        }
+        close(fd[1]);
+    }
+    else if(pipe_child>0){
+        close(fd[1]);
+        close(0);
+        dup(fd[0]);
+        close(fd[0]);
+        tokeniser(filename,args);
+        if(execvp(args[0],args)<0){                   //execute command and check if unsuccessful
+          perror("error: exec failed");
+          exit(1);
+        }
+    }
+    else{
+      perror("error: unable to fork");
+    }
+  }
 }
 
 void commandExecution(char input[])
-{
+{   
     pid_t pID=fork();
+    //*************child process************
     if (pID==0){
       signal(SIGINT, SIG_DFL);	
       char *args[20];
@@ -130,7 +172,15 @@ void commandExecution(char input[])
         filename= strtok(NULL," ");
         redirectionExecution(input,filename,args,READFROMFILE);
       }
+      else if(Type==PIPE){
+        char *filename;
+        strtok(input,"|");
+        filename= strtok(NULL,"|");       //filename will be command after pipe in this case
+        trimLeadingSpaces(filename,' ');
+        redirectionExecution(input,filename,args,PIPE);
+      }
     }
+    //****************parent process(OpSy Shell)******************
     else if(pID>0){
       signal(SIGINT, dontKillMe);
       int p=wait(NULL);
@@ -144,6 +194,22 @@ void commandExecution(char input[])
 void dontKillMe(){
 	printf("\n%s","$ ");
 	fflush(stdout);
+}
+
+void trimLeadingSpaces(char *str, char ch)      //to remove leading white spaces
+{
+    char *p, *q;
+    int done=0;
+    for (q = p = str; *p; p++){
+      if (*p != ch || done==1){
+        *q++ = *p;
+        done=1;
+      }   
+      else {
+        done=1;
+      }
+    }    
+    *q = '\0';
 }
 
 
