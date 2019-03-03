@@ -1,2 +1,2 @@
-# Shell69
-Implementation of a basic shell
+# OpSy-Shell 
+Implementation of a basic shell in C
