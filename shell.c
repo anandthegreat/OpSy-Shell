@@ -7,9 +7,9 @@
 #include<fcntl.h>
 #include<signal.h>
 
-enum type { 
-  OVERWRITE2FILE, APPEND2FILE, READFROMFILE, PIPE, NORMAL 
-  //>>            >            <             |
+enum type {
+  OVERWRITE2FILE, APPEND2FILE, READFROMFILE, PIPE, OPRDRCT, ERRDRCT, NORMAL
+  //>>            >            <             |     1>       2>
 } Type;
 
 void dontKillMe();											//function prototype
@@ -28,23 +28,25 @@ enum type redirectionChecker(char *input,char **args){
   char *q=strstr(input,">");                                //check if > exists in input string
   char *r=strstr(input,"<");                                //check if < exists in the input string
   char *s=strstr(input,"|");                                //check if | exists in the input string
+  char *outputRedirect=strstr(input,"1>");
+  char *errorRedirect=strstr(input,"2>");
 //   int i=0;
 //   args[i] = strtok(input,">");                           //arr[0] will have command name
 //   while(args[i]!=NULL) args[++i] = strtok(NULL,">");
 // printf("%d\n", i);
 
-  
+
   if(p!=NULL)      return APPEND2FILE; //should be above q!=NULL check
+  else if(outputRedirect!=NULL) return OPRDRCT;
+  else if(errorRedirect!=NULL) return ERRDRCT;
   else if(q!=NULL) return OVERWRITE2FILE;
   else if(r!=NULL) return READFROMFILE;
   else if(s!=NULL) return PIPE;
-  else             return NORMAL;
-//
+  else return NORMAL;
 //   args[++i]=NULL;
 
 }
 void redirectionExecution(char *input,char *filename,char **args,enum type r_type){ //r_type = redirection type
-  printf("====>%s\n",filename );
 
   if(r_type==APPEND2FILE)             // >> case
 //  if(filename[0]=='>') //for append not working
@@ -65,18 +67,16 @@ void redirectionExecution(char *input,char *filename,char **args,enum type r_typ
   }
 
   else if(r_type==OVERWRITE2FILE){     // > case
-
-    // printf("%d\n",filename[0]=='>');
     close(1);
     int fd;
     if(fd = open(filename,O_WRONLY|O_CREAT|O_TRUNC,0777)==-1){
       perror("error: failed to open/create file");
     }
     else{
-    tokeniser(input,args);
-    if(execvp(args[0],args)<0){
-      perror("error: exec failed");
-      exit(1);
+      tokeniser(input,args);
+      if(execvp(args[0],args)<0){
+        perror("error: exec failed");
+        exit(1);
       }
     }
   }
@@ -86,7 +86,7 @@ void redirectionExecution(char *input,char *filename,char **args,enum type r_typ
     int fd;
     if(fd= open(filename,O_RDONLY)==-1){
       perror("error: failed to open file");
-    } 
+    }
     else{
     tokeniser(input,args);
     if(execvp(args[0],args)<0){
@@ -107,40 +107,68 @@ void redirectionExecution(char *input,char *filename,char **args,enum type r_typ
       if the command is : "ls | wc - l", the child will execute ls,
       and send it to the stdin of parent (who executes wc -l)
     */
-    if(pipe_child==0){                                
-        close(fd[0]);
+    if(pipe_child==0){
         close(1);
         dup(fd[1]);
+        close(fd[0]);
+        close(fd[1]);
         tokeniser(input,args);
         if(execvp(args[0],args)<0){                   //execute command and check if unsuccessful
           perror("error: exec failed");
           exit(1);
         }
-        close(fd[1]);
     }
     else if(pipe_child>0){
-        close(fd[1]);
         close(0);
         dup(fd[0]);
         close(fd[0]);
+        close(fd[1]);
         tokeniser(filename,args);
         if(execvp(args[0],args)<0){                   //execute command and check if unsuccessful
           perror("error: exec failed");
           exit(1);
         }
     }
+    else perror("error: unable to fork");
+  }
+
+  else if(r_type==OPRDRCT){
+    close(1);
+    int fd;
+    if(fd = open(filename,O_WRONLY|O_CREAT|O_TRUNC,0777)==-1){
+      perror("error: failed to open/create file");
+    }
     else{
-      perror("error: unable to fork");
+      tokeniser(input,args);
+      if(execvp(args[0],args)<0){
+        perror("error: exec failed");
+        exit(1);
+      }
+    }
+  }
+
+  else if(r_type==ERRDRCT){
+    close(2);
+    int fd;
+    if(fd = open(filename,O_WRONLY|O_CREAT|O_TRUNC,0777)==-1){
+      perror("error: failed to open/create file");
+    }
+    else{
+      tokeniser(input,args);
+      if(execvp(args[0],args)<0){
+        perror("error: exec failed");
+        exit(1);
+      }
     }
   }
 }
 
 void commandExecution(char input[])
-{   
+{
     pid_t pID=fork();
     //*************child process************
     if (pID==0){
-      signal(SIGINT, SIG_DFL);	
+      signal(SIGINT, SIG_DFL);
       char *args[20];
       Type=redirectionChecker(input, args);
       if(Type==NORMAL)
@@ -151,19 +179,18 @@ void commandExecution(char input[])
           exit(1);
         }
       }
-      else if(Type==OVERWRITE2FILE){                   // >
+      else if(Type==OVERWRITE2FILE){                  // >
         char *filename;
         strtok(input,">");
         filename= strtok(NULL," ");
         redirectionExecution(input,filename,args,OVERWRITE2FILE);
       }
-      else if(Type==APPEND2FILE){                  // >>
+      else if(Type==APPEND2FILE){                     // >>
         char *filename;
         char *ptr = input;
         filename=strtok_r(ptr,">>",&ptr);
         filename=strtok_r(ptr,">>",&ptr);
         filename=strtok(filename," ");
-        printf("%s\n",filename);
         redirectionExecution(input,filename,args,APPEND2FILE);
       }
       else if(Type==READFROMFILE){
@@ -174,10 +201,30 @@ void commandExecution(char input[])
       }
       else if(Type==PIPE){
         char *filename;
+        // printf("%s180\n", filename);
         strtok(input,"|");
+        // printf("%s182\n", filename);
         filename= strtok(NULL,"|");       //filename will be command after pipe in this case
+        // printf("%s\n184", filename);
         trimLeadingSpaces(filename,' ');
         redirectionExecution(input,filename,args,PIPE);
+      }
+      else if(Type==OPRDRCT){
+        char *filename;
+        // printf("%s188\n", input);
+        strtok(input,"1>");
+        // printf("%s190\n", input);
+        filename= strtok(NULL,"1>");       //filename will be command after 1> in this case
+        // printf("%s192\n", args);
+        trimLeadingSpaces(filename,' ');
+        redirectionExecution(input,filename,args,OPRDRCT);
+      }
+      else if(Type==ERRDRCT){
+        char *filename;
+        strtok(input,"1>");
+        filename= strtok(NULL,"1>");       //filename will be command after pipe in this case
+        trimLeadingSpaces(filename,' ');
+        redirectionExecution(input,filename,args,ERRDRCT);
       }
     }
     //****************parent process(OpSy Shell)******************
@@ -204,11 +251,11 @@ void trimLeadingSpaces(char *str, char ch)      //to remove leading white spaces
       if (*p != ch || done==1){
         *q++ = *p;
         done=1;
-      }   
+      }
       else {
         done=1;
       }
-    }    
+    }
     *q = '\0';
 }
 
@@ -219,16 +266,16 @@ int main()
   char input[100];
   char line[100];
   while(1)
-  {    
+  {
   		printf("%s","$ " );
   		fgets(line,100,stdin);
   		if(strcmp(line,"\n")!=0)
   		{
   		sscanf(line,"%[^\n]%*c",input);
         //scanf ("%[^\n]%*c", input);
-        if (strcmp(input,"exit")==0) 
+        if (strcmp(input,"exit")==0)
           break;
-     
+
         if(strcmp(input,"\n")!=0)
        		commandExecution(input);
  	    }
