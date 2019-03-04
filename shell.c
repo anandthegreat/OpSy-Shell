@@ -221,8 +221,8 @@ void commandExecution(char input[])
       }
       else if(Type==ERRDRCT){
         char *filename;
-        strtok(input,"1>");
-        filename= strtok(NULL,"1>");       //filename will be command after pipe in this case
+        strtok(input,"2>");
+        filename= strtok(NULL,"2>");       //filename will be command after pipe in this case
         trimLeadingSpaces(filename,' ');
         redirectionExecution(input,filename,args,ERRDRCT);
       }
